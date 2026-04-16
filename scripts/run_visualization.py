@@ -1,10 +1,16 @@
 """
 Comprehensive visualization script for CIS 5450 Volatility Prediction.
-Generates 15 presentation-quality plots covering raw data, EDA, features, and model results.
+Generates presentation-quality plots covering raw data, EDA, features, and model results.
 
 Usage:
     conda activate ctestenv
-    python scripts/run_visualization.py
+    python scripts/run_visualization.py                  # all sections
+    python scripts/run_visualization.py --section 1      # raw data only (3 plots)
+    python scripts/run_visualization.py --section 2      # EDA only (4 plots)
+    python scripts/run_visualization.py --section 3      # feature analysis only (3 plots)
+    python scripts/run_visualization.py --section 4      # model results only (5 plots)
+    python scripts/run_visualization.py --section 3 4    # features + results
+    python scripts/run_visualization.py --skip-corr      # skip correlation heatmap (saves 1.4GB RAM)
 """
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -152,13 +158,8 @@ def plot_metrics_heatmap(metrics_df, save_path=None):
 # Main
 # ═══════════════════════════════════════════════════════════════════════════
 
-def main():
-    OUTPUT_FIGURES.mkdir(parents=True, exist_ok=True)
-    plot_num = 0
-
-    # ================================================================
-    # SECTION 1: Raw Data (3 plots)
-    # ================================================================
+def run_section_1():
+    """Section 1: Raw Data (3 plots) — price, returns, Q-Q."""
     print("\n" + "=" * 60)
     print("SECTION 1: Raw Data (3 plots)")
     print("=" * 60)
@@ -167,66 +168,67 @@ def main():
     df = pd.read_parquet(DATA_PROCESSED / "btcusdt_1m_clean.parquet")
     returns = log_returns(df["close"])
 
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating price + volume plot...")
+    print("  [1] Generating price + volume plot...")
     plot_price_volume(df, OUTPUT_FIGURES / "01_price_volume.png")
     plt.close("all")
 
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating return distribution plot...")
+    print("  [2] Generating return distribution plot...")
     plot_return_dist(returns, OUTPUT_FIGURES / "02_return_distribution.png")
     plt.close("all")
 
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating Q-Q plot...")
+    print("  [3] Generating Q-Q plot...")
     plot_qq(returns, OUTPUT_FIGURES / "03_qq_plot.png")
     plt.close("all")
 
-    # ================================================================
-    # SECTION 2: Data Processing & EDA (4 plots)
-    # ================================================================
+    del df, returns
+    gc.collect()
+
+
+def run_section_2(skip_corr=False):
+    """Section 2: EDA (3-4 plots) — ACF, RV, correlation, rolling stats."""
     print("\n" + "=" * 60)
-    print("SECTION 2: Data Processing & EDA (4 plots)")
+    print("SECTION 2: Data Processing & EDA")
     print("=" * 60)
 
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating ACF plot...")
+    logger.info("Loading cleaned data...")
+    df = pd.read_parquet(DATA_PROCESSED / "btcusdt_1m_clean.parquet")
+    returns = log_returns(df["close"])
+
+    print("  [4] Generating ACF plot...")
     plot_acf_squared(returns, save_path=OUTPUT_FIGURES / "04_acf_squared.png")
     plt.close("all")
 
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating realized volatility time series...")
+    print("  [5] Generating realized volatility time series...")
     target = pd.read_parquet(DATA_PROCESSED / "target.parquet")["realized_volatility"]
     plot_rv_timeseries(target.dropna(), OUTPUT_FIGURES / "05_realized_volatility.png")
     plt.close("all")
 
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating feature correlation heatmap...")
-    features = pd.read_parquet(DATA_PROCESSED / "features.parquet")
-    plot_correlation(features, OUTPUT_FIGURES / "06_correlation.png")
-    del features
-    gc.collect()
-    plt.close("all")
+    if skip_corr:
+        print("  [6] Skipping correlation heatmap (--skip-corr)")
+    else:
+        print("  [6] Generating feature correlation heatmap (loading 1.4GB features)...")
+        features = pd.read_parquet(DATA_PROCESSED / "features.parquet")
+        plot_correlation(features, OUTPUT_FIGURES / "06_correlation.png")
+        del features
+        gc.collect()
+        plt.close("all")
 
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating rolling stats plot...")
+    print("  [7] Generating rolling stats plot...")
     plot_rolling_stats(df, OUTPUT_FIGURES / "07_rolling_stats.png")
     plt.close("all")
 
-    # Free large objects
     del df, returns
     gc.collect()
 
-    # ================================================================
-    # SECTION 3: Feature Analysis (3 plots)
-    # ================================================================
+
+def run_section_3():
+    """Section 3: Feature Analysis (3 plots) — importance, ablation, top-K."""
     print("\n" + "=" * 60)
     print("SECTION 3: Feature Analysis (3 plots)")
     print("=" * 60)
 
     # --- Feature Importance ---
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating XGBoost feature importance...")
+    print("  [8] Generating XGBoost feature importance...")
     imp_path = OUTPUT_TABLES / "xgb_feature_importance.csv"
     if imp_path.exists():
         importance_df = pd.read_csv(imp_path)
@@ -243,8 +245,7 @@ def main():
         print("    WARNING: xgb_feature_importance.csv not found, skipping")
 
     # --- Feature Group Ablation ---
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating feature group ablation...")
+    print("  [9] Generating feature group ablation...")
     abl_path = OUTPUT_TABLES / "xgb_ablation.csv"
     if abl_path.exists():
         ablation_df = pd.read_csv(abl_path)
@@ -268,8 +269,7 @@ def main():
         print("    WARNING: xgb_ablation.csv not found, skipping")
 
     # --- Top-K Features ---
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating top-K features curve...")
+    print("  [10] Generating top-K features curve...")
     topk_path = OUTPUT_TABLES / "xgb_topk.csv"
     if topk_path.exists():
         topk_df = pd.read_csv(topk_path)
@@ -286,9 +286,9 @@ def main():
     else:
         print("    WARNING: xgb_topk.csv not found, skipping")
 
-    # ================================================================
-    # SECTION 4: Model Results (5 plots)
-    # ================================================================
+
+def run_section_4():
+    """Section 4: Model Results (5 plots) — predictions, metrics, residuals, heatmap."""
     print("\n" + "=" * 60)
     print("SECTION 4: Model Results (5 plots)")
     print("=" * 60)
@@ -308,11 +308,12 @@ def main():
     else:
         best_lstm_name = None
 
-    print(f"  Best LSTM model: {best_lstm_name} "
-          f"(MSE={full_metrics.loc[best_lstm_name, 'MSE']:.2e})" if best_lstm_name else "")
+    if best_lstm_name:
+        print(f"  Best LSTM model: {best_lstm_name} "
+              f"(MSE={full_metrics.loc[best_lstm_name, 'MSE']:.2e})")
 
     # --- Load predictions ---
-    # Load target and compute test split
+    # Load target and compute test split (read only the index from features)
     target = pd.read_parquet(DATA_PROCESSED / "target.parquet")["realized_volatility"]
     features_idx = pd.read_parquet(DATA_PROCESSED / "features.parquet",
                                    columns=[]).index
@@ -340,7 +341,6 @@ def main():
     # Load best LSTM
     best_lstm_preds = None
     if best_lstm_name:
-        # Convert model name to filename: "LSTM_seq120_attn" -> "lstm_predictions_seq120_attn.pkl"
         tag = best_lstm_name.replace("LSTM_", "")
         lstm_path = OUTPUT_MODELS / f"lstm_predictions_{tag}.pkl"
         if lstm_path.exists():
@@ -356,16 +356,13 @@ def main():
         print(f"  Aligned test predictions: {len(pred_df)} common timestamps")
 
         # --- Plot 11: Predictions Overlay ---
-        plot_num += 1
-        print(f"  [{plot_num}/15] Generating predictions overlay...")
+        print("  [11] Generating predictions overlay...")
         plot_predictions_multi(pred_df,
                                OUTPUT_FIGURES / "11_predictions_overlay.png")
         plt.close("all")
 
-        # --- Plot 12: Metrics Comparison Bar Chart (3 key models) ---
-        plot_num += 1
-        print(f"  [{plot_num}/15] Generating metrics comparison bar chart...")
-        # Build a subset metrics table for the 3 key models
+        # --- Plot 12: Metrics Comparison Bar Chart ---
+        print("  [12] Generating metrics comparison bar chart...")
         subset_results = {}
         for name in pred_dict:
             overlap = test_actual.index.intersection(pred_dict[name].index)
@@ -380,16 +377,14 @@ def main():
         plt.close("all")
 
         # --- Plot 13: Cumulative Error ---
-        plot_num += 1
-        print(f"  [{plot_num}/15] Generating cumulative error plot...")
+        print("  [13] Generating cumulative error plot...")
         plot_cumulative_error_multi(pred_df,
                                     OUTPUT_FIGURES / "13_cumulative_error.png")
         plt.close("all")
 
         # --- Plot 14: Residual Analysis for Best LSTM ---
-        plot_num += 1
         if best_lstm_preds is not None:
-            print(f"  [{plot_num}/15] Generating residual analysis for best LSTM...")
+            print("  [14] Generating residual analysis for best LSTM...")
             overlap = test_actual.index.intersection(best_lstm_preds.index)
             plot_residuals(
                 test_actual.loc[overlap].values,
@@ -399,33 +394,50 @@ def main():
             )
             plt.close("all")
         else:
-            print(f"  [{plot_num}/15] Skipping residual analysis (no LSTM predictions)")
-
+            print("  [14] Skipping residual analysis (no LSTM predictions)")
     else:
-        print("  WARNING: No prediction files found, skipping plots 11–14")
-        plot_num += 4
+        print("  WARNING: No prediction files found, skipping plots 11-14")
 
     # --- Plot 15: Full Model Comparison Heatmap ---
-    plot_num += 1
-    print(f"  [{plot_num}/15] Generating model comparison heatmap...")
-    # Exclude GARCH from heatmap if its R2 is extremely negative (distorts scale)
+    print("  [15] Generating model comparison heatmap...")
     heatmap_metrics = full_metrics.copy()
     if "GARCH" in heatmap_metrics.index and heatmap_metrics.loc["GARCH", "R2"] < -1:
-        # Show GARCH separately — its R2=-14.5 destroys the color scale
-        print("    Note: GARCH excluded from heatmap (R²=-14.5 distorts color scale)")
+        print("    Note: GARCH excluded from heatmap (R2=-14.5 distorts color scale)")
         heatmap_metrics = heatmap_metrics.drop("GARCH")
     plot_metrics_heatmap(heatmap_metrics,
                          OUTPUT_FIGURES / "15_model_comparison_heatmap.png")
     plt.close("all")
 
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate visualization plots")
+    parser.add_argument("--section", type=int, nargs="+", default=None,
+                        help="Sections to run (1-4). Default: all.")
+    parser.add_argument("--skip-corr", action="store_true",
+                        help="Skip correlation heatmap to save 1.4GB RAM")
+    args = parser.parse_args()
+
+    OUTPUT_FIGURES.mkdir(parents=True, exist_ok=True)
+
+    sections = args.section if args.section else [1, 2, 3, 4]
+
+    if 1 in sections:
+        run_section_1()
+    if 2 in sections:
+        run_section_2(skip_corr=args.skip_corr)
+    if 3 in sections:
+        run_section_3()
+    if 4 in sections:
+        run_section_4()
+
     # ================================================================
     # DONE
     # ================================================================
     print("\n" + "=" * 60)
-    print(f"COMPLETE: 15 figures saved to {OUTPUT_FIGURES}")
+    print(f"COMPLETE: Figures saved to {OUTPUT_FIGURES}")
     print("=" * 60)
 
-    # List generated files
     pngs = sorted(OUTPUT_FIGURES.glob("*.png"))
     for p in pngs:
         size_kb = p.stat().st_size / 1024

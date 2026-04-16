@@ -527,6 +527,98 @@ We use **Optuna** with the **TPE (Tree-structured Parzen Estimator)** sampler to
 
 The loss function is `reg:squarederror` (standard MSE regression). The best parameter set is saved to `outputs/models/xgboost_best_params.pkl`.
 
+### Tuning Results
+
+After 50 Optuna TPE trials, the best hyperparameters found are:
+
+| Hyperparameter | Best Value | Interpretation |
+|----------------|-----------|----------------|
+| `max_depth` | 6 | Mid-range tree depth; deep enough to capture feature interactions, shallow enough to avoid overfitting |
+| `learning_rate` | 0.0682 | Moderate step size (search was 0.01–0.1 log-scale) |
+| `n_estimators` | 256 | Relatively few trees (search allowed up to 1000); combined with moderate LR, prevents overfitting |
+| `subsample` | 0.732 | ~73% row sampling per tree — adds stochasticity to reduce variance |
+| `colsample_bytree` | 0.800 | ~80% feature sampling per tree — mild feature dropout |
+| `min_child_weight` | 7 | Conservative — requires at least 7 samples per leaf, suppresses splits on noise |
+| `gamma` | 0.000222 | Near-zero minimum split gain — allows most informative splits through |
+| `reg_alpha` (L1) | 0.151 | Light L1 regularization — mild feature sparsity pressure |
+| `reg_lambda` (L2) | 0.682 | Meaningful L2 regularization — smooths leaf weights to prevent overfitting |
+
+The combination of moderate depth (6), few trees (256), high `min_child_weight` (7), and strong L2 regularization (0.682) indicates the tuner favored a model that resists overfitting — which is expected for noisy 1-minute financial data where most variation is unpredictable.
+
+### Test Set Performance
+
+| Metric | Value |
+|--------|-------|
+| MSE | 1.076 × 10⁻⁷ |
+| RMSE | 3.280 × 10⁻⁴ |
+| MAE | 1.852 × 10⁻⁴ |
+| QLIKE | 0.3210 |
+| R² | 0.6131 |
+| DA | 0.3772 |
+
+XGBoost achieves the **highest R² (0.613)** and the **lowest QLIKE (0.321)** among all 12 models tested, including all LSTM and Transformer variants. Its low QLIKE indicates particularly well-calibrated variance forecasts. The relatively low directional accuracy (37.7%) reflects that XGBoost tends to produce smooth predictions that track the level of volatility well but lag behind rapid directional changes.
+
+### Feature Importance Analysis
+
+Gain-based feature importances from the trained XGBoost model reveal which features contribute most to prediction accuracy:
+
+**Top 10 features (accounting for 87% of total importance):**
+
+| Rank | Feature | Importance | Cumulative | Category |
+|------|---------|-----------|------------|----------|
+| 1 | `ret_std_30` | 32.75% | 32.75% | Rolling volatility (30-min) |
+| 2 | `ret_std_10` | 17.07% | 49.82% | Rolling volatility (10-min) |
+| 3 | `ret_std_60` | 13.62% | 63.43% | Rolling volatility (60-min) |
+| 4 | `parkinson_30` | 7.05% | 70.48% | Parkinson estimator (30-min) |
+| 5 | `garman_klass_10` | 5.42% | 75.90% | Garman-Klass estimator (10-min) |
+| 6 | `parkinson_5` | 3.69% | 79.59% | Parkinson estimator (5-min) |
+| 7 | `parkinson_10` | 3.19% | 82.78% | Parkinson estimator (10-min) |
+| 8 | `bollinger_width` | 2.05% | 84.83% | Technical indicator |
+| 9 | `parkinson_60` | 1.33% | 86.16% | Parkinson estimator (60-min) |
+| 10 | `garman_klass_5` | 1.28% | 87.44% | Garman-Klass estimator (5-min) |
+
+**Key insight:** Volatility estimators dominate overwhelmingly. The top 3 features alone — all rolling standard deviations at different windows — account for 63% of total importance. This confirms the intuition that recent realized volatility is the strongest predictor of near-future volatility (volatility clustering).
+
+**Zero-importance features (11 features):** `ret_kurt_30`, `ret_skew_5`, and `lag_3` through `lag_10` received zero importance, meaning the model never split on them. This suggests that autoregressive lag information beyond lag_2 is redundant when rolling statistics are available.
+
+### Feature Group Ablation
+
+Ablation experiments measure the impact of removing entire feature groups:
+
+| Experiment | Removed | Kept | R² | Delta R² |
+|------------|---------|------|-----|----------|
+| **All features (baseline)** | 0 | 52 | **0.5698** | — |
+| No ATR/Bollinger | 2 | 50 | 0.5700 | +0.04% |
+| No lag features | 10 | 42 | 0.5693 | -0.09% |
+| No volume features | 5 | 47 | 0.5689 | -0.16% |
+| No time encoding | 2 | 50 | 0.5673 | -0.44% |
+| No volatility estimators | 8 | 44 | 0.5572 | -2.21% |
+| No rolling stats | 24 | 28 | 0.5565 | -2.33% |
+| Only rolling stats | — | 24 | 0.5556 | -2.49% |
+| Only lag features | — | 10 | 0.4622 | -18.88% |
+
+**Findings:**
+- **Rolling statistics and volatility estimators are critical** — removing either drops R² by ~2.3%. These are the backbone of the model.
+- **Lag features, volume, and time encoding are nearly redundant** — removing any of these has < 0.5% impact, because the rolling statistics already encode temporal and volume information.
+- **ATR/Bollinger removal actually improves R² marginally** (+0.04%), suggesting slight collinearity with existing volatility features.
+- **Using only lag features collapses R² to 0.462** — a 19% drop, confirming that raw lagged returns alone are insufficient without the derived rolling statistics.
+
+### Top-K Feature Analysis
+
+Training with only the top-K features (ranked by importance) shows diminishing returns:
+
+| Top-K | R² | Marginal Gain |
+|-------|-----|---------------|
+| 5 | 0.5362 | — |
+| 10 | 0.5477 | +1.15% |
+| 15 | 0.5493 | +0.16% |
+| 20 | 0.5602 | +1.09% |
+| 30 | 0.5683 | +0.81% |
+| 40 | 0.5690 | +0.07% |
+| 52 (all) | 0.5698 | +0.08% |
+
+Just the top 5 features achieve R² = 0.536 — **94% of the full model's performance** with only 10% of the features. Performance essentially saturates at 20–30 features; the remaining 22–32 features contribute only 0.15% additional R².
+
 ### Expanding Window Prediction
 
 Function `xgb_expanding_predict()` (lines 194–223).

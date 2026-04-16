@@ -114,7 +114,7 @@ def validate_completeness(df: pd.DataFrame) -> dict:
         "nulls": df.isnull().sum().to_dict(),
     }
 
-    # Check for time gaps > 1 minute (60_000 ms)
+    # time gaps > 1 minute
     if "open_time" in df.columns:
         times = pd.to_numeric(df["open_time"])
         diffs = times.diff().dropna()
@@ -137,7 +137,7 @@ def validate_completeness(df: pd.DataFrame) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# REGEX CLEANING (course requirement)
+# REGEX CLEANING 
 # ═══════════════════════════════════════════════════════════════════════════
 
 def validate_timestamps(series: pd.Series) -> pd.Series:
@@ -233,10 +233,7 @@ def clean_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     df["timestamp"] = pd.to_datetime(ts_ms, unit="ms", utc=True)
     df = df.set_index("timestamp")
 
-    # Drop helper columns
     df = df.drop(columns=["open_time", "close_time", "ignore"], errors="ignore")
-
-    # 5. Sort and deduplicate
     df = df.sort_index()
     df = df[~df.index.duplicated(keep="first")]
 
@@ -247,9 +244,7 @@ def clean_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.reindex(full_range)
     df.index.name = "timestamp"
 
-    # Identify gap sizes
     was_nan = df["close"].isna()
-    # Forward-fill only gaps <= 2 rows (2 minutes)
     gap_groups = was_nan.ne(was_nan.shift()).cumsum()
     gap_sizes = was_nan.groupby(gap_groups).transform("sum")
     small_gaps = was_nan & (gap_sizes <= 2)
@@ -259,14 +254,11 @@ def clean_raw_data(df: pd.DataFrame) -> pd.DataFrame:
         large_gap_count = large_gaps.sum()
         logger.warning(f"{large_gap_count} rows in gaps > 2 minutes (not filled)")
 
-    # Forward-fill small gaps
     df = df.ffill()
-    # Drop any remaining NaN rows (from large gaps or edges)
     df = df.dropna(subset=["close"])
 
     logger.info(f"Cleaned data: {len(df)} rows, index from {df.index.min()} to {df.index.max()}")
 
-    # Demonstrate extract_trading_pair (course requirement)
     pair = extract_trading_pair(BINANCE_SYMBOL)
     logger.info(f"Trading pair extracted: {pair}")
 
@@ -315,7 +307,6 @@ def init_duckdb(db_path: Path = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
 
 def ingest_candles(conn: duckdb.DuckDBPyConnection, df: pd.DataFrame):
     """Bulk insert cleaned candle data into raw_candles table."""
-    # Reset index so timestamp is a column
     insert_df = df.reset_index()
     insert_df = insert_df[[
         "timestamp", "open", "high", "low", "close", "volume",
@@ -323,7 +314,7 @@ def ingest_candles(conn: duckdb.DuckDBPyConnection, df: pd.DataFrame):
         "taker_buy_quote_volume",
     ]]
 
-    conn.execute("DELETE FROM raw_candles")  # idempotent reload
+    conn.execute("DELETE FROM raw_candles")
     conn.execute("INSERT INTO raw_candles SELECT * FROM insert_df")
     count = conn.execute("SELECT COUNT(*) FROM raw_candles").fetchone()[0]
     logger.info(f"Ingested {count} candles into DuckDB")
@@ -381,7 +372,6 @@ def store_predictions(
 def compare_models_sql(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     """
     SQL JOIN across predictions table to compare per-timestamp errors.
-    Demonstrates JOIN for course requirement.
     """
     query = """
         SELECT

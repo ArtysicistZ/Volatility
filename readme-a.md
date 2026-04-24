@@ -57,7 +57,7 @@ open_time,    open,     high,     low,      close,    volume,   close_time,    q
 
 One year of BTCUSDT at 1-minute resolution ≈ **525,000 rows × 12 columns**. Plenty of chances for messy data.
 
-But the table looks very confusing. 
+But the table looks very confusing, for example, the open_time / close_time means this: e.g., 1711929600000 = 2024-04-01 00:00:00 UTC; price at open, high, low, close means e.g. ~$70,500, but the current format is very confusing. 
 
 ### 1.2 What can go wrong
 
@@ -103,8 +103,6 @@ def validate_numeric_fields(df, columns):
     return df
 ```
 
-> **Analogy.** Think of regex as a bouncer at a club door. It has a strict rule ("must be all digits, must be 13 to 16 of them") and turns away anyone who doesn't match — *before* they get on the dance floor and cause trouble downstream.
-
 **Step 2 — Type coercion & timestamp normalization.**
 After the bouncer does its job, we cast to proper dtypes (`float64` for prices/volumes, `int64` for timestamps). Microsecond timestamps (`> 1e15`) are floor-divided by 1000 to unify everything in milliseconds, then converted to a UTC `DatetimeIndex`:
 
@@ -116,7 +114,7 @@ df = df.set_index("timestamp").sort_index()
 df = df[~df.index.duplicated(keep="first")]
 ```
 
-**Step 3 — Sort, deduplicate, handle gaps.**
+**Step 3 — Sort, deduplicate, handle gaps (e.g. missing minutes)**
 We reindex to a complete 1-minute grid (`pd.date_range(..., freq="1min")`), then:
 - **Gaps ≤ 2 minutes** → forward-fill (short hiccup, last-known-price is reasonable)
 - **Gaps > 2 minutes** → leave as NaN and drop (better to lose data than fabricate it)

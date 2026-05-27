@@ -11,3 +11,12 @@ __pycache__/
 .env
 .ipynb_checkpoints/
 project_proposal.*
+
+# OS / editor cruft
+.DS_Store
+**/.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/
